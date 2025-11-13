@@ -36,7 +36,6 @@ Flock You is an advanced detection system designed to identify Flock Safety surv
 
 ### Option 1: Oui-Spy Device (Available at colonelpanic.tech)
 - **Microcontroller**: Xiao ESP32 S3
-- **Display**: 5-inch 1280x720 IPS TFT with multi-touch
 - **Wireless**: Dual WiFi/BLE scanning capabilities
 - **Audio**: Built-in buzzer system
 - **Connectivity**: USB-C for programming and power

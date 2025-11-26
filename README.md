@@ -1,12 +1,14 @@
-# Flock You: Flock Safety Detection System
+# Flock You OLED: Flock Safety Detection System, now with a screen!
 
 <img src="flock.png" alt="Flock You" width="300px">
+<img src="oled.jpg" alt="Detection displayed on OLED screen" width="300px">
 
 **Professional surveillance camera detection for the Oui-Spy device available at [colonelpanic.tech](https://colonelpanic.tech)**
 
 ## Overview
 
-Flock You is an advanced detection system designed to identify Flock Safety surveillance cameras, Raven gunshot detectors, and similar surveillance devices using multiple detection methodologies. Built for the Xiao ESP32 S3 microcontroller, it provides real-time monitoring with audio alerts and comprehensive JSON output. The system now includes specialized BLE service UUID fingerprinting for detecting SoundThinking/ShotSpotter Raven acoustic surveillance devices.
+Flock You is an advanced detection system designed to identify Flock Safety surveillance cameras, Raven gunshot detectors, and similar surveillance devices using multiple detection methodologies. Built for the Xiao ESP32 C3 microcontroller, it provides real-time monitoring with audio alerts and comprehensive JSON output. The system now includes specialized BLE service UUID fingerprinting for detecting SoundThinking/ShotSpotter Raven acoustic surveillance devices.
+I adapted it to run on an ESP32-C3 and made it display details of the latest detection on a tiny screen!
 
 ## Features
 

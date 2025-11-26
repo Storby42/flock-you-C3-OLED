@@ -1027,16 +1027,16 @@ void loop()
         u8g2.setFont( u8g2_font_5x8_tf);
         if(animframe<3){
             u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly00_bitmap);
-            u8g2.printf("Searching...");
+            u8g2.printf("Listening...");
         } else if (animframe<6){
             u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly01_bitmap);
-            u8g2.printf("Searching....");
+            u8g2.printf("Listening....");
         } else if (animframe<9){
             u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly02_bitmap);
-            u8g2.printf("Searching.");
+            u8g2.printf("Listening.");
         } else if (animframe<=11){
             u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly03_bitmap);
-            u8g2.printf("Searching..");
+            u8g2.printf("Listening..");
             if(animframe==11){
                 animframe=0;
             }

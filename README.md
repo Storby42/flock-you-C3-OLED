@@ -3,7 +3,8 @@
 <img src="flock.png" alt="Flock You" width="300px">
 <img src="oled.jpg" alt="Detection displayed on OLED screen" width="300px">
 
-**Professional surveillance camera detection for the Oui-Spy device available at [colonelpanic.tech](https://colonelpanic.tech)**
+**Originally based on the Oui-Spy device (available at [colonelpanic.tech](https://colonelpanic.tech))**
+**now runs on ESP32-C3 0.42 OLED, thanks to [kevin's page](https://emalliab.wordpress.com/2025/02/12/esp32-c3-0-42-oled/) for providing documentation on how to use the screen.**
 
 ## Overview
 

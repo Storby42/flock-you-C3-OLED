@@ -11,21 +11,26 @@
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 
+//display thingy
+#include <U8g2lib.h>
+#include <Wire.h>
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
 // Hardware Configuration
-#define BUZZER_PIN 3  // GPIO3 (D2) - PWM capable pin on Xiao ESP32 S3
+#define BUZZER_PIN 4  // GPIO3 (D2) - PWM capable pin on Xiao ESP32 S3
+#define LED_PIN 8
 
 // Audio Configuration
-#define LOW_FREQ 200      // Boot sequence - low pitch
-#define HIGH_FREQ 800     // Boot sequence - high pitch & detection alert
-#define DETECT_FREQ 1000  // Detection alert - high pitch (faster beeps)
+#define LOW_FREQ 300      // Boot sequence - low pitch
+#define HIGH_FREQ 400     // Boot sequence - high pitch & detection alert
+#define DETECT_FREQ 800  // Detection alert - high pitch (faster beeps)
 #define HEARTBEAT_FREQ 600 // Heartbeat pulse frequency
 #define BOOT_BEEP_DURATION 300   // Boot beep duration
-#define DETECT_BEEP_DURATION 150 // Detection beep duration (faster)
-#define HEARTBEAT_DURATION 100   // Short heartbeat pulse
+#define DETECT_BEEP_DURATION 50 // Detection beep duration (faster)
+#define HEARTBEAT_DURATION 15   // Short heartbeat pulse
 
 // WiFi Promiscuous Mode Configuration
 #define MAX_CHANNEL 13
@@ -41,6 +46,15 @@ static unsigned long last_ble_scan = 0;
 #define MAX_MAC_PATTERNS 50
 #define MAX_DEVICE_NAMES 20
 
+//oled thingy continued
+// there is no 72x40 constructor in u8g2 hence the 72x40 screen is
+// mapped in the middle of the 132x64 pixel buffer of the SSD1306 controller
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, 6, 5);
+int width = 70;
+int height = 40;
+int xOffset = 30; // = (132-w)/2
+int yOffset = 24; // = (64-h)/2
+
 // ============================================================================
 // DETECTION PATTERNS (Extracted from Real Flock Safety Device Databases)
 // ============================================================================
@@ -52,7 +66,7 @@ static const char* wifi_ssid_patterns[] = {
     "FLOCK",        // All caps variant
     "FS Ext Battery", // Flock Safety Extended Battery devices
     "Penguin",      // Penguin surveillance devices
-    "Pigvision"     // Pigvision surveillance systems
+    "Pigvision"    // Pigvision surveillance systems
 };
 
 // Known Flock Safety MAC address prefixes (from real device databases)
@@ -176,7 +190,7 @@ void heartbeat_pulse()
 {
     printf("Heartbeat: Device still in range\n");
     beep(HEARTBEAT_FREQ, HEARTBEAT_DURATION);
-    delay(100);
+    delay(5);
     beep(HEARTBEAT_FREQ, HEARTBEAT_DURATION);
 }
 
@@ -252,6 +266,28 @@ void output_wifi_detection_json(const char* ssid, const uint8_t* mac, int rssi, 
     String json_output;
     serializeJson(doc, json_output);
     Serial.println(json_output);
+    //the oled finale
+    u8g2.clearBuffer(); // clear the internal memory
+    //u8g2.drawFrame(xOffset, yOffset, width, height); //draw a frame around the border
+    u8g2.setFont(u8g2_font_tiny5_tf);
+    u8g2.setCursor(xOffset, yOffset+5);
+    u8g2.printf("SSID: %s", doc["ssid"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+11);
+    u8g2.printf("%s", doc["mac_address"].as<String>().c_str());
+    u8g2.setFont(u8g2_font_u8glib_4_tf);
+    u8g2.setCursor(xOffset, yOffset+16);
+    u8g2.printf("Type: %s, %s,", doc["protocol"].as<String>().c_str(), doc["detection_method"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+22);
+    u8g2.printf("%s", doc["detection_criteria"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+28);
+    u8g2.printf("Threat: %s", doc["threat_score"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+34);
+    u8g2.printf("RSSI: %s, %s", doc["rssi"].as<String>().c_str(), doc["signal_strength"].as<String>().c_str());
+    u8g2.sendBuffer(); // transfer internal memory to the display
+
+    digitalWrite(LED_PIN, LOW);
+    delay(5);
+    digitalWrite(LED_PIN, HIGH);
 }
 
 void output_ble_detection_json(const char* mac, const char* name, int rssi, const char* detection_method)
@@ -261,7 +297,7 @@ void output_ble_detection_json(const char* mac, const char* name, int rssi, cons
     // Core detection info
     doc["timestamp"] = millis();
     doc["detection_time"] = String(millis() / 1000.0, 3) + "s";
-    doc["protocol"] = "bluetooth_le";
+    doc["protocol"] = "BLE";
     doc["detection_method"] = detection_method;
     doc["alert_level"] = "HIGH";
     doc["device_category"] = "FLOCK_SAFETY";
@@ -337,6 +373,29 @@ void output_ble_detection_json(const char* mac, const char* name, int rssi, cons
     String json_output;
     serializeJson(doc, json_output);
     Serial.println(json_output);
+
+    u8g2.clearBuffer(); // clear the internal memory
+    //u8g2.drawFrame(xOffset, yOffset, width, height); //draw a frame around the border
+    u8g2.setFont(u8g2_font_tiny5_tf);
+    u8g2.setCursor(xOffset, yOffset+5);
+    u8g2.printf("Name: %s", doc["device_name"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+11);
+    u8g2.printf("%s", doc["mac_address"].as<String>().c_str());
+    u8g2.setFont(u8g2_font_u8glib_4_tf);
+    u8g2.setCursor(xOffset, yOffset+16);
+    u8g2.printf("Type: %s, %s,", doc["protocol"].as<String>().c_str(), doc["detection_method"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+22);
+    u8g2.printf("%s", doc["detection_criteria"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+28);
+    u8g2.printf("Threat: %s", doc["threat_score"].as<String>().c_str());
+    u8g2.setCursor(xOffset, yOffset+34);
+    u8g2.printf("RSSI: %s, %s", doc["rssi"].as<String>().c_str(), doc["signal_strength"].as<String>().c_str());
+    u8g2.sendBuffer(); // transfer internal memory to the display
+
+    digitalWrite(LED_PIN, LOW);
+    delay(5);
+    digitalWrite(LED_PIN, HIGH);
+    
 }
 
 // ============================================================================
@@ -359,7 +418,6 @@ bool check_mac_prefix(const uint8_t* mac)
 bool check_ssid_pattern(const char* ssid)
 {
     if (!ssid) return false;
-    
     for (int i = 0; i < sizeof(wifi_ssid_patterns)/sizeof(wifi_ssid_patterns[0]); i++) {
         if (strcasestr(ssid, wifi_ssid_patterns[i])) {
             return true;
@@ -500,31 +558,63 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
     const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
     
-    // Check for probe requests (subtype 0x04) and beacons (subtype 0x08)
-    uint8_t frame_type = (hdr->frame_ctrl & 0xFF) >> 2;
-    if (frame_type != 0x20 && frame_type != 0x80) { // Probe request or beacon
-        return;
-    }
+    // Determine frame subtype from raw packet bytes (more reliable than bitfields)
+    const uint8_t* raw = (const uint8_t*)ppkt->payload;
+    uint8_t fc0 = raw[0]; // subtype/type in high nibble
+    uint8_t fc1 = raw[1]; // flags (ToDS/FromDS etc)
+    bool is_probe = (fc0 & 0xF0) == 0x40; // subtype 4 -> 0x40
+    bool is_beacon = (fc0 & 0xF0) == 0x80; // subtype 8 -> 0x80
+    if (!is_probe && !is_beacon) return;
     
-    // Extract SSID from probe request or beacon
+    // Extract SSID from probe request or beacon (robust parser)
     char ssid[33] = {0};
-    uint8_t *payload = (uint8_t *)ipkt + 24; // Skip MAC header
-    
-    if (frame_type == 0x20) { // Probe request
-        payload += 0; // Probe requests start with SSID immediately
-    } else { // Beacon frame
-        payload += 12; // Skip fixed parameters in beacon
+
+    // Calculate actual header length from fc1 (ToDS/FromDS) using raw bytes
+    bool to_ds = (fc1 & 0x01) != 0;
+    bool from_ds = (fc1 & 0x02) != 0;
+    size_t hdr_len = 24 + ((to_ds && from_ds) ? 6 : 0); // addr4 present when both ToDS and FromDS
+
+    // Pointer to the start of the 802.11 frame (ppkt->payload)
+    const uint8_t* pkt_bytes = raw;
+
+    // For beacon frames, skip the fixed parameters (12 bytes) after the header
+    size_t ie_offset = hdr_len + (is_beacon ? 12 : 0);
+
+    // Defensive bounds for parsing IEs (we don't have exact packet length here)
+    const size_t MAX_IE_PARSE = 512;
+
+    if (ie_offset < MAX_IE_PARSE) {
+        const uint8_t* ie_ptr = pkt_bytes + ie_offset;
+        size_t idx = 0;
+        // Dump small IE area for debugging
+        //Serial.println("IE area dump:");
+        //dump_packet_hex(ie_ptr, 64);
+
+        while (idx + 1 < MAX_IE_PARSE) {
+            uint8_t tag = ie_ptr[idx];
+            uint8_t len = ie_ptr[idx + 1];
+
+            // Stop if IE would overflow our parsing window
+            if (idx + 2 + (size_t)len > MAX_IE_PARSE) break;
+
+            if (tag == 0) { // SSID element
+                size_t copy_len = len > 32 ? 32 : len;
+                if (copy_len > 0) memcpy(ssid, &ie_ptr[idx + 2], copy_len);
+                ssid[copy_len] = '\0';
+                break;
+            }
+
+            idx += 2 + (size_t)len;
+            if (idx == 0) break; // safety
+        }
     }
-    
-    // Parse SSID element (tag 0, length, data)
-    if (payload[0] == 0 && payload[1] <= 32) {
-        memcpy(ssid, &payload[2], payload[1]);
-        ssid[payload[1]] = '\0';
-    }
-    
+
+    // Print SSID for debug (empty means hidden or not present)
+    //Serial.print("SSID: ");
+    //Serial.println(ssid[0] ? ssid : "<hidden/empty>");
     // Check if SSID matches our patterns
     if (strlen(ssid) > 0 && check_ssid_pattern(ssid)) {
-        const char* detection_type = (frame_type == 0x20) ? "probe_request" : "beacon";
+    const char* detection_type = is_probe ? "probe_request" : "beacon";
         output_wifi_detection_json(ssid, hdr->addr2, ppkt->rx_ctrl.rssi, detection_type);
         
         if (!triggered) {
@@ -537,8 +627,13 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
     }
     
     // Check MAC address
+    const uint8_t* mac = hdr->addr2;
+    char mac_str[9];  // Only need first 3 octets for prefix check
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
+    //Serial.println(mac_str);
+
     if (check_mac_prefix(hdr->addr2)) {
-        const char* detection_type = (frame_type == 0x20) ? "probe_request_mac" : "beacon_mac";
+    const char* detection_type = is_probe ? "probe_request_mac" : "beacon_mac";
         output_wifi_detection_json(ssid[0] ? ssid : "hidden", hdr->addr2, ppkt->rx_ctrl.rssi, detection_type);
         
         if (!triggered) {
@@ -676,17 +771,33 @@ void setup()
     
     // Initialize buzzer
     pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
     digitalWrite(BUZZER_PIN, LOW);
+    //delay(5000);
     boot_beep_sequence();
+    
+
+    //more oled shenanigans
+    delay(1000);
+    u8g2.begin();
+    u8g2.setContrast(255); // set contrast to maximum 
+    u8g2.setBusClock(400000); //400kHz I2C 
+    u8g2.setFont(u8g2_font_u8glib_4_tf);
     
     printf("Starting Flock Squawk Enhanced Detection System...\n\n");
     
     // Initialize WiFi in promiscuous mode
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
+    //WiFi.mode(WIFI_STA);
+    //WiFi.disconnect();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT(); 
+    esp_wifi_init(&cfg); 
+    esp_wifi_set_storage(WIFI_STORAGE_RAM); 
+    esp_wifi_set_mode(WIFI_MODE_NULL); 
+    esp_wifi_start(); 
+    esp_wifi_set_promiscuous(true); 
     delay(100);
     
-    esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(&wifi_sniffer_packet_handler);
     esp_wifi_set_channel(current_channel, WIFI_SECOND_CHAN_NONE);
     
@@ -704,6 +815,7 @@ void setup()
     
     printf("BLE scanner initialized\n");
     printf("System ready - hunting for Flock Safety devices...\n\n");
+    digitalWrite(LED_PIN, HIGH);
     
     last_channel_hop = millis();
 }
@@ -741,5 +853,15 @@ void loop()
         pBLEScan->clearResults();
     }
     
-    delay(100);
+    
+    delay(50);
+    
+    /*
+    //the oled finale
+    u8g2.clearBuffer(); // clear the internal memory
+    u8g2.drawFrame(xOffset, yOffset, width, height); //draw a frame around the border
+    u8g2.setCursor(xOffset+1, yOffset+12);
+    u8g2.printf("%dx%d", width, height);
+    u8g2.sendBuffer(); // transfer internal memory to the display
+    */
 }

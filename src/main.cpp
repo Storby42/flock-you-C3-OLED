@@ -20,7 +20,7 @@
 // CONFIGURATION
 // ============================================================================
 
-#define WIPE_EEPROM_ON_STARTUP false // Set to true to clear saved device suffixes on startup
+#define WIPE_EEPROM_ON_STARTUP false// Set to true to clear saved device suffixes on startup
 // Hardware Configuration
 #define BUZZER_PIN 4  // GPIO3 (D2) - PWM capable pin on Xiao ESP32 S3
 #define LED_PIN 8
@@ -1197,6 +1197,8 @@ void setup()
             count = 0;
             EEPROM.write(0, 0);
             EEPROM.write(1, 0);
+            EEPROM.commit();
+            printf("Erasing MAC suffix list...\n");
         }
         saved_device_count = count;
 

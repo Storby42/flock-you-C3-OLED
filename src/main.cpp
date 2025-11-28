@@ -45,7 +45,7 @@ static unsigned long last_ble_scan = 0;
 
 // Detection Pattern Limits
 #define MAX_SSID_PATTERNS 10
-#define MAX_MAC_PATTERNS 40
+#define MAX_MAC_PATTERNS 1024
 #define MAX_DEVICE_NAMES 20
 
 //oled thingy continued

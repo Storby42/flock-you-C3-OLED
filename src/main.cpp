@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <EEPROM.h>
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 
@@ -19,6 +20,7 @@
 // CONFIGURATION
 // ============================================================================
 
+#define WIPE_EEPROM_ON_STARTUP false // Set to true to clear saved device suffixes on startup
 // Hardware Configuration
 #define BUZZER_PIN 4  // GPIO3 (D2) - PWM capable pin on Xiao ESP32 S3
 #define LED_PIN 8
@@ -43,13 +45,21 @@ static unsigned long last_ble_scan = 0;
 
 // Detection Pattern Limits
 #define MAX_SSID_PATTERNS 10
-#define MAX_MAC_PATTERNS 50
+#define MAX_MAC_PATTERNS 40
 #define MAX_DEVICE_NAMES 20
 
 //oled thingy continued
 
 #ifndef BIRD_BITMAP_H
 #define BIRD_BITMAP_H
+
+int new_device_count = 0;
+int detected_device_count = 0;
+int saved_device_count = 0;
+char detected_devices[MAX_MAC_PATTERNS][32];
+static uint8_t saved_devices[MAX_MAC_PATTERNS][6];; // Store up to max_mac_patterns MAC addresses
+
+String current_action = "booting";
 
 // Width: 70
 // Height: 40
@@ -361,13 +371,13 @@ void boot_beep_sequence()
     printf("Audio system ready\n\n");
 }
 
-void flock_detected_beep_sequence()
+void flock_detected_beep_sequence(int beeps)
 {
     printf("FLOCK SAFETY DEVICE DETECTED!\n");
     printf("Playing alert sequence: 3 fast high-pitch beeps\n");
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < beeps; i++) {
         beep(DETECT_FREQ, DETECT_BEEP_DURATION);
-        if (i < 2) delay(50); // Short gap between beeps
+        if (i < beeps - 1) delay(50); // Short gap between beeps
     }
     printf("Detection complete - device identified!\n\n");
     
@@ -383,6 +393,78 @@ void heartbeat_pulse()
     beep(HEARTBEAT_FREQ, HEARTBEAT_DURATION);
     delay(5);
     beep(HEARTBEAT_FREQ, HEARTBEAT_DURATION);
+}
+
+// ============================================================================
+// Device List Handler
+// ============================================================================
+
+int append_mac_to_device_list(const uint8_t* mac)
+{
+    uint8_t mac_suffix[3];
+    memcpy(mac_suffix, &mac[3], 3);
+    
+    // Check if MAC is already in the list
+    for (size_t i = 0; i < detected_device_count; i++) {
+        if (memcmp(detected_devices[i], mac, 6) == 0) {
+            printf("MAC already in detected_devices list\n");
+            return 2; // Already in list
+        }
+    }
+    
+    // Add MAC to the list if there's space
+    if (detected_device_count < MAX_MAC_PATTERNS) {
+        memcpy(detected_devices[detected_device_count], mac, 6);
+        detected_device_count++;
+        bool suffix_found = false;
+        for (int i = 0; i < saved_device_count; i++) {
+            if (memcmp(&saved_devices[i][3], mac_suffix, 3) == 0) {
+                suffix_found = true;
+                break;
+            }
+        }
+
+        if (!suffix_found) {
+            if (saved_device_count < MAX_MAC_PATTERNS) {
+                memcpy(saved_devices[saved_device_count], mac, 6);
+                saved_device_count++;
+                printf("Saved device suffix added\n");
+                {
+                    int index = saved_device_count - 1; // index of the entry we just added
+                    int base = 2 + index * 3; // EEPROM layout: bytes 0-1 = count, then 3 bytes per suffix
+
+                    // Write the 3-byte MAC suffix (bytes 3..5 of full MAC) to EEPROM
+                    EEPROM.write(base + 0, mac[3]);
+                    EEPROM.write(base + 1, mac[4]);
+                    EEPROM.write(base + 2, mac[5]);
+
+                    // Update saved_device_count in EEPROM (little-endian uint16 at addr 0..1)
+                    EEPROM.write(0, saved_device_count & 0xFF);
+                    EEPROM.write(1, (saved_device_count >> 8) & 0xFF);
+
+                    // Commit changes to flash
+                    if (EEPROM.commit()) {
+                        Serial.printf("EEPROM: stored suffix #%d at addr %d -> %02x:%02x:%02x\n",
+                                      index, base, mac[3], mac[4], mac[5]);
+                    } else {
+                        Serial.println("EEPROM commit failed!");
+                    }
+                }
+            } else {
+                printf("Saved devices array full, cannot store suffix\n");
+            }
+            new_device_count++;
+            return 8;
+        } 
+        else {
+            printf("MAC suffix already present in saved_devices\n");
+            return 4;
+        }
+    }
+    else {
+        printf("Device list full, cannot add new MAC\n");
+        return 4;
+    }
 }
 
 // ============================================================================
@@ -800,6 +882,11 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
         }
     }
 
+    const uint8_t* mac = hdr->addr2;
+    // Check MAC address
+    //char mac_str[9];  // Only need first 3 octets for prefix check
+    //snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
+    //Serial.println(mac_str);
     // Print SSID for debug (empty means hidden or not present)
     //Serial.print("SSID: ");
     //Serial.println(ssid[0] ? ssid : "<hidden/empty>");
@@ -810,18 +897,22 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
         
         if (!triggered) {
             triggered = true;
-            flock_detected_beep_sequence();
+            /*
+            if(append_mac_to_device_list(mac)){
+                flock_detected_beep_sequence(4);
+                printf("New device detected \n");
+            }
+            else{
+                flock_detected_beep_sequence(2);
+                printf("Device already in detected list, no beep.\n");
+            }
+            */
+            flock_detected_beep_sequence(append_mac_to_device_list(mac));
         }
         // Always update detection time for heartbeat tracking
         last_detection_time = millis();
         return;
     }
-    
-    // Check MAC address
-    const uint8_t* mac = hdr->addr2;
-    char mac_str[9];  // Only need first 3 octets for prefix check
-    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
-    //Serial.println(mac_str);
 
     if (check_mac_prefix(hdr->addr2)) {
     const char* detection_type = is_probe ? "probe_request_mac" : "beacon_mac";
@@ -829,7 +920,18 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
         
         if (!triggered) {
             triggered = true;
-            flock_detected_beep_sequence();
+            /*
+            if(append_mac_to_device_list(mac)){
+                flock_detected_beep_sequence(4);
+                printf("New device detected \n");
+            }
+            else{
+                flock_detected_beep_sequence(2);
+                printf("Device already in detected list, no beep.\n");
+            }
+            */
+            flock_detected_beep_sequence(append_mac_to_device_list(mac));
+            
         }
         // Always update detection time for heartbeat tracking
         last_detection_time = millis();
@@ -861,7 +963,17 @@ class AdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
             output_ble_detection_json(addrStr.c_str(), name.c_str(), rssi, "mac_prefix");
             if (!triggered) {
                 triggered = true;
-                flock_detected_beep_sequence();
+                /*
+                if(append_mac_to_device_list(mac)){
+                    flock_detected_beep_sequence(4);
+                    printf("New device detected \n");
+                }
+                else{
+                    flock_detected_beep_sequence(2);
+                    printf("Device already in detected list, no beep.\n");
+                }
+                */
+                flock_detected_beep_sequence(append_mac_to_device_list(mac));
             }
             // Always update detection time for heartbeat tracking
             last_detection_time = millis();
@@ -873,7 +985,17 @@ class AdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
             output_ble_detection_json(addrStr.c_str(), name.c_str(), rssi, "device_name");
             if (!triggered) {
                 triggered = true;
-                flock_detected_beep_sequence();
+                /*
+                if(append_mac_to_device_list(mac)){
+                    flock_detected_beep_sequence(4);
+                    printf("New device detected \n");
+                }
+                else{
+                    flock_detected_beep_sequence(2);
+                    printf("Device already in detected list, no beep.\n");
+                }
+                */
+                flock_detected_beep_sequence(append_mac_to_device_list(mac));
             }
             // Always update detection time for heartbeat tracking
             last_detection_time = millis();
@@ -924,7 +1046,17 @@ class AdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
             
             if (!triggered) {
                 triggered = true;
-                flock_detected_beep_sequence();
+                /*
+                if(append_mac_to_device_list(mac)){
+                    flock_detected_beep_sequence(4);
+                    printf("New device detected. \n");
+                }
+                else{
+                    flock_detected_beep_sequence(2);
+                    printf("Device already in detected list.\n");
+                }
+                */
+                flock_detected_beep_sequence(append_mac_to_device_list(mac));
             }
             // Always update detection time for heartbeat tracking
             last_detection_time = millis();
@@ -951,9 +1083,80 @@ void hop_channel()
     }
 }
 
+
+
+// ============================================================================
+// ANIMATION FUNCTION
+// ============================================================================
+void animate_oled(){
+    if(!device_in_range && !triggered){
+        u8g2.clearBuffer(); // clear the internal memory
+        u8g2.setCursor(xOffset, yOffset+34);
+        u8g2.setFont( u8g2_font_5x8_tf);
+        if(animframe<3){
+            u8g2.drawXBMP(xOffset-5, yOffset, 32, 24, fly00_bitmap);
+            u8g2.printf("Scan..");
+        } else if (animframe<6){
+            u8g2.drawXBMP(xOffset-5, yOffset, 32, 24, fly01_bitmap);
+            u8g2.printf("Scan...");
+        } else if (animframe<9){
+            u8g2.drawXBMP(xOffset-5, yOffset, 32, 24, fly02_bitmap);
+            u8g2.printf("Scan");
+        } else if (animframe<=11){
+            u8g2.drawXBMP(xOffset-5, yOffset, 32, 24, fly03_bitmap);
+            u8g2.printf("Scan.");
+            if(animframe==11){
+                animframe=0;
+            }
+        }
+        // Format the current_action into a C-string and use that for width calculation / printing
+        char action_buf[32];
+        snprintf(action_buf, sizeof(action_buf), "[%s]", current_action.c_str());
+        u8g2.setCursor(xOffset+70 - u8g2.getStrWidth(action_buf), yOffset+34);
+        u8g2.printf("%s", action_buf);
+        animframe++;
+        u8g2.setFont(u8g2_font_u8glib_4_tf);
+        u8g2.setCursor(xOffset+20, yOffset+5);
+        if(detected_device_count==0){
+            u8g2.printf("%d Found (Yay!)", detected_device_count);
+        }
+        else{
+            u8g2.printf("%d Found", detected_device_count);
+        }
+        u8g2.setCursor(xOffset+25, yOffset+10);
+        u8g2.printf("%d Saved", saved_device_count);
+        u8g2.setCursor(xOffset+30, yOffset+15);
+        u8g2.printf("%d New", new_device_count);
+        u8g2.setCursor(xOffset+25, yOffset+21);
+        {
+            unsigned long up_ms = millis();
+            unsigned long up_s = up_ms / 1000;
+            unsigned int hours = up_s / 3600;
+            unsigned int minutes = (up_s % 3600) / 60;
+            unsigned int seconds = up_s % 60;
+            u8g2.printf("UP: %02u:%02u:%02u", hours, minutes, seconds);
+        }
+        u8g2.setCursor(xOffset+20, yOffset+26);
+        {
+            unsigned long up_ms = millis()-last_detection_time;
+            unsigned long up_s = up_ms / 1000;
+            unsigned int hours = up_s / 3600;
+            unsigned int minutes = (up_s % 3600) / 60;
+            unsigned int seconds = up_s % 60;
+            if(last_detection_time==0){
+                u8g2.printf("LAST: --:--:--");
+            }
+            else{
+            u8g2.printf("LAST: %02u:%02u:%02u", hours, minutes, seconds);
+            }
+        }
+        u8g2.sendBuffer(); // transfer internal memory to the display
+    }
+}
 // ============================================================================
 // MAIN FUNCTIONS
 // ============================================================================
+
 
 void setup()
 {
@@ -965,9 +1168,7 @@ void setup()
     digitalWrite(LED_PIN, LOW);
     digitalWrite(BUZZER_PIN, LOW);
     //delay(5000);
-    
-    
-
+ 
     //more oled shenanigans
     
     u8g2.begin();
@@ -979,7 +1180,49 @@ void setup()
     u8g2.sendBuffer(); // transfer internal memory to the display
     delay(500);
     boot_beep_sequence();
-    delay(2000);
+    delay(1000);
+
+    //init eeprom and load known MAC suffixes
+    // Initialize EEPROM and load saved 3-byte MAC suffixes into saved_devices
+    {
+        // Allocate EEPROM space: 2 bytes for count + 3 bytes per possible saved suffix
+        int eepromSize = 2 + MAX_MAC_PATTERNS * 3;
+        if (eepromSize < 512) eepromSize = 512; // ensure a reasonable minimum for ESP32
+        EEPROM.begin(eepromSize);
+
+        // Read saved device count (stored as little-endian uint16 at addr 0..1)
+        uint16_t count = (uint16_t)EEPROM.read(0) | ((uint16_t)EEPROM.read(1) << 8);
+        if (count > MAX_MAC_PATTERNS) count = 0; //Set count to 0 in case of new eeprom
+        if(WIPE_EEPROM_ON_STARTUP){
+            count = 0;
+            EEPROM.write(0, 0);
+            EEPROM.write(1, 0);
+        }
+        saved_device_count = count;
+
+        if (saved_device_count == 0) {
+            printf("No saved MAC suffixes in EEPROM\n");
+        } else {
+            printf("Loading %d saved MAC suffix(es) from EEPROM\n", saved_device_count);
+            for (int i = 0; i < saved_device_count; ++i) {
+                int base = 2 + i * 3;
+                uint8_t b0 = EEPROM.read(base + 0);
+                uint8_t b1 = EEPROM.read(base + 1);
+                uint8_t b2 = EEPROM.read(base + 2);
+
+                // Store suffix in bytes [3..5] to match runtime checks (first 3 bytes left zero)
+                saved_devices[i][0] = 0x00;
+                saved_devices[i][1] = 0x00;
+                saved_devices[i][2] = 0x00;
+                saved_devices[i][3] = b0;
+                saved_devices[i][4] = b1;
+                saved_devices[i][5] = b2;
+
+                printf("Loaded suffix #%d: %02x:%02x:%02x\n", i, b0, b1, b2);
+            }
+        }
+    }
+    delay(1000);
     
     printf("Starting Flock Squawk Enhanced Detection System...\n\n");
     
@@ -1020,31 +1263,7 @@ void loop()
 {
     // Handle channel hopping for WiFi promiscuous mode
     hop_channel();
-
-    if(!device_in_range && !triggered){
-        u8g2.clearBuffer(); // clear the internal memory
-        u8g2.setCursor(xOffset, yOffset+32);
-        u8g2.setFont( u8g2_font_5x8_tf);
-        if(animframe<3){
-            u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly00_bitmap);
-            u8g2.printf("Listening...");
-        } else if (animframe<6){
-            u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly01_bitmap);
-            u8g2.printf("Listening....");
-        } else if (animframe<9){
-            u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly02_bitmap);
-            u8g2.printf("Listening.");
-        } else if (animframe<=11){
-            u8g2.drawXBMP(xOffset, yOffset, 32, 24, fly03_bitmap);
-            u8g2.printf("Listening..");
-            if(animframe==11){
-                animframe=0;
-            }
-        }
-        animframe++;
-        u8g2.sendBuffer(); // transfer internal memory to the display
-    }
-    
+    current_action = ("CH" + String(current_channel)).c_str();
     // Handle heartbeat pulse if device is in range
     if (device_in_range) {
         unsigned long now = millis();
@@ -1065,9 +1284,12 @@ void loop()
     
     if (millis() - last_ble_scan >= BLE_SCAN_INTERVAL && !pBLEScan->isScanning()) {
         printf("[BLE] scan...\n");
+        current_action = String("BLE");
+        animate_oled();
         pBLEScan->start(BLE_SCAN_DURATION, false);
         last_ble_scan = millis();
     }
+    else animate_oled();
     
     if (pBLEScan->isScanning() == false && millis() - last_ble_scan > BLE_SCAN_DURATION * 1000) {
         pBLEScan->clearResults();
